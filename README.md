@@ -177,6 +177,7 @@ Copy `backend/.env.example` to `backend/.env`:
 | `CORS_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` | Comma-separated browser origins allowed to call the API. Only needed for the separate dev frontend; the single-server build is same-origin. |
 | `RATE_LIMIT_PER_MINUTE` | `30` | Max AI requests per user/IP per minute (`0` disables). |
 | `DAILY_QUOTA` | `100` | Max AI requests per user/IP per UTC day (`0` disables). Caps cloud cost. |
+| `LIMITS_DB` | *(empty)* | Path to a SQLite file that persists rate-limit/quota counts across restarts. Empty = in-memory. Keep the app on a single instance when set. |
 | `API_KEY` | *(empty)* | When set, the AI endpoints require this key (`X-API-Key` header or `Authorization: Bearer`). The web UI prompts for it and remembers it in the browser. |
 | `MAX_IMAGE_PIXELS` | `40000000` | Reject images above this pixel count (decompression-bomb guard). |
 | `MAX_PDF_PAGES` | `20` | Reject PDFs with more pages than this. |
@@ -244,6 +245,12 @@ daily quota (`DAILY_QUOTA`, default 100/day, resetting at UTC midnight).
 Exceeding either returns `429 Too Many Requests` with a `Retry-After` header.
 When the quota is enabled, responses also carry `X-Quota-Limit` and
 `X-Quota-Remaining` headers.
+
+Counters are **in-memory by default** (reset on restart, per process). Set
+`LIMITS_DB` to a SQLite path (e.g. `/data/limits.db` on a mounted Fly volume) to
+persist them across restarts. That store is single-writer, so keep the app on
+**one instance** — the Fly config mounts a volume, which makes Fly deploy a
+single Machine. For horizontal scaling, back the limiter with a shared store.
 
 **Access control.** When OAuth is configured, the AI endpoints require a
 signed-in session. When `API_KEY` is set, they instead (or additionally) accept
@@ -315,8 +322,10 @@ Notes for hosting:
 - Serve it behind HTTPS and set `TRUST_PROXY=true` so rate limiting sees the
   real client IP. Set `PUBLIC_BASE_URL` so cookies are `Secure` and OAuth
   redirect URIs are correct.
-- The built-in rate limiter is per-process and in-memory; for multiple replicas
-  add a limiter at the proxy as well.
+- The built-in limiter is in-memory by default; set `LIMITS_DB` to a SQLite path
+  to persist counts. Its store is single-writer, so keep the app on one instance
+  (the Fly config's volume mount enforces this); for multiple replicas add a
+  shared limiter at the proxy as well.
 
 ### Fly.io
 
@@ -324,6 +333,7 @@ A `fly.toml` is included.
 
 ```bash
 fly launch --no-deploy          # or edit `app` in fly.toml to a unique name
+fly volumes create study_buddy_data --size 1 --region iad   # persists LIMITS_DB
 fly secrets set \
   SESSION_SECRET="$(openssl rand -hex 32)" \
   OPENROUTER_API_KEY=sk-or-... \
@@ -332,6 +342,10 @@ fly secrets set \
   GITHUB_CLIENT_ID=... GITHUB_CLIENT_SECRET=...
 fly deploy
 ```
+
+The volume mount makes Fly run a **single Machine** for this app; that is
+intended, since the rate-limit/quota store is single-writer. Don't
+`fly scale count` it above 1.
 
 Then add the callback URLs (`https://<app>.fly.dev/api/auth/callback/google`
 and `.../github`) to the provider apps you created in

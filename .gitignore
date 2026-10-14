@@ -9,6 +9,12 @@ env/
 # Secrets / local config
 .env
 
+# Local limiter store / data dir
+*.db
+*.db-wal
+*.db-shm
+data/
+
 # --- Node / frontend ---
 node_modules/
 dist/

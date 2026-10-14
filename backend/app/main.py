@@ -47,6 +47,7 @@ app.add_middleware(
     RateLimitMiddleware,
     limit_per_minute=settings.rate_limit_per_minute,
     daily_quota=settings.daily_quota,
+    store_path=settings.limits_db or None,
 )
 
 app.add_middleware(

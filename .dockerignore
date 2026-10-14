@@ -8,6 +8,12 @@
 .env
 **/.env
 
+# Local limiter store / data dir
+*.db
+*.db-wal
+*.db-shm
+data/
+
 # Node / frontend build output (rebuilt inside the image)
 **/node_modules/
 frontend/dist/

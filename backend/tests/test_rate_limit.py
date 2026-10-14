@@ -38,10 +38,13 @@ def test_bucket_key_prefers_signed_in_user():
     assert rate_limit._bucket_key(_request()) == "ip:1.2.3.4"
 
 
-def _app(limit: int, daily_quota: int = 0) -> FastAPI:
+def _app(limit: int, daily_quota: int = 0, store_path=None) -> FastAPI:
     app = FastAPI()
     app.add_middleware(
-        RateLimitMiddleware, limit_per_minute=limit, daily_quota=daily_quota
+        RateLimitMiddleware,
+        limit_per_minute=limit,
+        daily_quota=daily_quota,
+        store_path=store_path,
     )
 
     @app.get("/api/health")
@@ -106,3 +109,42 @@ def test_quota_zero_disables_quota():
 def test_disabled_quota_sends_no_header():
     client = TestClient(_app(limit=0, daily_quota=0))
     assert "X-Quota-Remaining" not in client.post("/api/explain").headers
+
+
+def test_sqlite_store_persists_across_instances(tmp_path):
+    db = str(tmp_path / "limits.db")
+
+    client1 = TestClient(_app(limit=0, daily_quota=2, store_path=db))
+    assert client1.post("/api/explain").status_code == 200
+    assert client1.post("/api/explain").status_code == 200
+
+    # New app + middleware, same DB file -> quota still exhausted (persisted).
+    client2 = TestClient(_app(limit=0, daily_quota=2, store_path=db))
+    r = client2.post("/api/explain")
+    assert r.status_code == 429
+    assert "Daily limit" in r.json()["detail"]
+
+
+def test_sqlite_store_tracks_remaining_header(tmp_path):
+    db = str(tmp_path / "limits.db")
+
+    client1 = TestClient(_app(limit=0, daily_quota=5, store_path=db))
+    assert client1.post("/api/explain").headers["X-Quota-Remaining"] == "4"
+
+    client2 = TestClient(_app(limit=0, daily_quota=5, store_path=db))
+    assert client2.post("/api/explain").headers["X-Quota-Remaining"] == "3"
+
+
+def test_sqlite_store_enforces_minute_limit(tmp_path):
+    db = str(tmp_path / "limits.db")
+    client = TestClient(_app(limit=2, daily_quota=0, store_path=db))
+    assert client.post("/api/explain").status_code == 200
+    assert client.post("/api/explain").status_code == 200
+    assert client.post("/api/explain").status_code == 429
+
+
+def test_sqlite_store_creates_parent_directory(tmp_path):
+    db = str(tmp_path / "nested" / "dir" / "limits.db")
+    client = TestClient(_app(limit=0, daily_quota=1, store_path=db))
+    assert client.post("/api/explain").status_code == 200
+    assert (tmp_path / "nested" / "dir" / "limits.db").is_file()

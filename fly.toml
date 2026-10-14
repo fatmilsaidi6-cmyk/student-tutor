@@ -1,5 +1,6 @@
 # Fly.io deployment config. Rename `app` to a globally-unique name
 # (or run `fly launch` and let it set the name), then:
+#   fly volumes create study_buddy_data --size 1 --region iad
 #   fly secrets set SESSION_SECRET=... OPENROUTER_API_KEY=... \
 #     GOOGLE_CLIENT_ID=... GOOGLE_CLIENT_SECRET=... \
 #     GITHUB_CLIENT_ID=... GITHUB_CLIENT_SECRET=... \
@@ -11,9 +12,19 @@ primary_region = "iad"
 [build]
   dockerfile = "Dockerfile"
 
+# Rate-limit/quota counters persist here so they survive restarts. A mounted
+# volume makes Fly deploy a single Machine (and fly launch will not add the
+# usual redundant second one), which is required for the single-writer SQLite
+# store. Do NOT `fly scale count` this app to more than 1 machine.
+[mounts]
+  source = "study_buddy_data"
+  destination = "/data"
+
 [env]
   # Trust Fly's edge proxy for the client IP (rate limiting).
   TRUST_PROXY = "true"
+  # Persist rate-limit/quota counters to the mounted volume (survives restarts).
+  LIMITS_DB = "/data/limits.db"
   # There is no local Ollama inside the container, so use the cloud engine.
   # Set OLLAMA_BASE_URL only if you point it at an external Ollama host.
   OLLAMA_BASE_URL = ""
@@ -23,6 +34,10 @@ primary_region = "iad"
   force_https = true
   auto_stop_machines = "stop"
   auto_start_machines = true
+  # Single machine (enforced by the volume mount above). Set to 1 to keep it
+  # always warm; 0 scales to zero between sessions (counters persist on the
+  # volume either way). There is intentionally no max setting: with a volume,
+  # Fly only creates one Machine for this app.
   min_machines_running = 0
   processes = ["app"]
 

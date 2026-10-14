@@ -29,8 +29,12 @@ COPY backend/ ./
 # main.py serves <repo>/frontend/dist, so place the built site there.
 COPY --from=frontend /frontend/dist /app/frontend/dist
 
+# /data is where the persistent limit/quota store lives (LIMITS_DB). Owned by
+# appuser so it works both with a mounted Fly volume (Fly chowns it to the
+# image user) and when running without a volume, e.g. local docker.
 RUN useradd --create-home --uid 10001 appuser \
-    && chown -R appuser:appuser /app
+    && mkdir -p /data \
+    && chown -R appuser:appuser /app /data
 USER appuser
 
 EXPOSE 8000

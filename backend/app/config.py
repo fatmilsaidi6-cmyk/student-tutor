@@ -36,6 +36,10 @@ class Settings:
     # Max AI requests per user (or IP when signed out) per UTC day (0 disables).
     daily_quota: int = int(os.getenv("DAILY_QUOTA", "100"))
 
+    # Optional path to a SQLite file used to persist rate-limit and quota
+    # counters across restarts. Empty = in-memory only (resets on restart).
+    limits_db: str = os.getenv("LIMITS_DB", "")
+
     # When set, the AI endpoints require this key (X-API-Key header or
     # Authorization: Bearer <key>). Leave empty to run open (local/self-hosted).
     api_key: str = os.getenv("API_KEY", "")
