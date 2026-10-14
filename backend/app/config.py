@@ -24,9 +24,22 @@ class Settings:
         "OPENROUTER_VISION_MODEL", "openai/gpt-4o-mini"
     )
 
+    # Comma-separated list of browser origins allowed to call the API.
+    # The single-server build is same-origin and needs no entry here.
+    cors_origins: str = os.getenv(
+        "CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"
+    )
+
+    # Max requests per client IP per minute to the AI endpoints (0 disables).
+    rate_limit_per_minute: int = int(os.getenv("RATE_LIMIT_PER_MINUTE", "30"))
+
     @property
     def cloud_enabled(self) -> bool:
         return bool(self.openrouter_api_key.strip())
+
+    @property
+    def cors_origins_list(self) -> list[str]:
+        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
 
 
 settings = Settings()

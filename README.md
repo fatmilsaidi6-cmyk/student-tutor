@@ -8,6 +8,7 @@ Study Buddy is an AI tutor. A student **types their problem or uploads a photo/P
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
 ![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
 ![Vite](https://img.shields.io/badge/Vite-8-646CFF?logo=vite&logoColor=white)
+![CI](https://github.com/fatmilsaidi6-cmyk/student-tutor/actions/workflows/ci.yml/badge.svg)
 
 ---
 
@@ -21,6 +22,8 @@ Study Buddy is an AI tutor. A student **types their problem or uploads a photo/P
 - [Configuration](#configuration)
 - [API reference](#api-reference)
 - [Running in VS Code](#running-in-vs-code)
+- [Testing](#testing)
+- [Deployment](#deployment)
 - [License](#license)
 
 ## Features
@@ -79,8 +82,11 @@ student-tutor/
 │   │   ├── ai.py          # local (Ollama) + cloud (OpenRouter) backends and routing
 │   │   ├── config.py      # environment-based settings
 │   │   ├── extract.py     # PDF text layer -> cloud vision -> local OCR
+│   │   ├── rate_limit.py  # per-IP rate limiting middleware
 │   │   └── prompts.py     # level-adapted Socratic tutoring prompts
+│   ├── tests/             # pytest suite (API + extraction)
 │   ├── requirements.txt
+│   ├── requirements-dev.txt
 │   └── .env.example
 ├── frontend/
 │   ├── src/
@@ -88,6 +94,8 @@ student-tutor/
 │   │   ├── components/Markdown.jsx  # markdown + KaTeX renderer
 │   │   └── lib/                 # api.js, storage.js
 │   └── package.json
+├── Dockerfile                   # single-image production build
+├── .github/workflows/ci.yml     # tests + lint + build on push/PR
 ├── .vscode/                     # launch + tasks for debugging/running
 └── student-tutor.code-workspace
 ```
@@ -156,6 +164,8 @@ Copy `backend/.env.example` to `backend/.env`:
 | `OLLAMA_BASE_URL` | `http://127.0.0.1:11434` | Local Ollama server. |
 | `OLLAMA_MODEL` | `Qwen-Hermes:latest` | Local model (set this to whatever you pulled). |
 | `OLLAMA_TIMEOUT` | `600` | Seconds to wait for a local answer. |
+| `CORS_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` | Comma-separated browser origins allowed to call the API. Only needed for the separate dev frontend; the single-server build is same-origin. |
+| `RATE_LIMIT_PER_MINUTE` | `30` | Max AI requests per client IP per minute (`0` disables). |
 
 ## API reference
 
@@ -166,6 +176,8 @@ Copy `backend/.env.example` to `backend/.env`:
 | `POST` | `/api/followup` | JSON: `context`, `messages[]`, `level`, `subject`, `engine` | `answer`, `engine_used` |
 
 `level` ∈ `primary · middle · high · university`; `engine` ∈ `auto · local · cloud`.
+
+The two AI endpoints are rate-limited per client IP (default 30 requests/minute, see `RATE_LIMIT_PER_MINUTE`). Exceeding it returns `429 Too Many Requests` with a `Retry-After` header.
 
 ```bash
 curl -X POST http://localhost:8000/api/explain \
@@ -180,6 +192,53 @@ Open **`student-tutor.code-workspace`**. The included configs let you start ever
 - **F5 → “App: single server (production)”** — builds the frontend and runs the API + UI on `:8000`.
 - **F5 → “Full stack (backend + frontend)”** — dev mode: FastAPI on `:8000` and Vite on `:5173`.
 - **Terminal → Run Task** — `app: build + run (single server)`, `backend: run`, `frontend: dev`, `frontend: lint`, and more.
+
+## Testing
+
+The backend ships with a [pytest](https://pytest.org) suite covering the API
+validation and error paths, rate limiting, and the PDF/OCR extraction pipeline:
+
+```bash
+cd backend
+source .venv/bin/activate
+pip install -r requirements-dev.txt   # installs pytest on top of the app deps
+pytest
+```
+
+The image-OCR test is skipped automatically when `tesseract` isn't installed.
+The frontend is checked with `npm run lint` and `npm run build`. All three run
+in CI on every push and pull request (`.github/workflows/ci.yml`).
+
+## Deployment
+
+The app is a single container: a Node stage builds the React UI, and a Python
+stage installs the backend (with Tesseract) and serves both the API and the
+built site from one port.
+
+```bash
+docker build -t study-buddy .
+docker run --rm -p 8000:8000 \
+  -e OLLAMA_BASE_URL=http://host.docker.internal:11434 \
+  -e OLLAMA_MODEL=qwen2.5:3b-instruct-q4_K_M \
+  study-buddy
+```
+
+Then open **http://localhost:8000**.
+
+To use the cloud engine instead of a local model, pass your key and pick a model:
+
+```bash
+docker run --rm -p 8000:8000 -e OPENROUTER_API_KEY=sk-or-... study-buddy
+```
+
+Notes for hosting:
+
+- Set `PORT` to change the listen port (default `8000`); the image already binds
+  to `0.0.0.0` and exposes a `/api/health` health check.
+- Serve it behind HTTPS/a reverse proxy and set `CORS_ORIGINS` only if you host
+  the frontend on a different origin.
+- The built-in rate limiter is per-process; for multiple replicas add a limiter
+  at the proxy as well.
 
 ## License
 

@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 from . import ai
 from .config import settings
 from .extract import read_homework
+from .rate_limit import RateLimitMiddleware
 
 ALLOWED_LEVELS = {"primary", "middle", "high", "university"}
 ALLOWED_ENGINES = {"auto", "local", "cloud"}
@@ -36,9 +37,13 @@ class FollowupRequest(BaseModel):
 
 app = FastAPI(title="Student Tutor API", version="0.1.0")
 
+# Rate limiting is added first (innermost) so it runs after CORS; CORS is added
+# last (outermost) so its headers are attached even to 429 responses.
+app.add_middleware(RateLimitMiddleware, limit_per_minute=settings.rate_limit_per_minute)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=settings.cors_origins_list,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
