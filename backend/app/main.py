@@ -1,16 +1,18 @@
 from __future__ import annotations
 
-import secrets
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+from starlette.middleware.sessions import SessionMiddleware
 
 from . import ai
+from .auth import require_access
+from .auth import router as auth_router
 from .config import settings
 from .extract import read_homework
 from .rate_limit import RateLimitMiddleware
@@ -22,24 +24,6 @@ MAX_FILES = 10
 
 # Built React app (frontend/dist), served by this same server in production.
 FRONTEND_DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
-
-
-def require_api_key(
-    x_api_key: str | None = Header(default=None),
-    authorization: str | None = Header(default=None),
-) -> None:
-    """Gate the AI endpoints when API_KEY is configured.
-
-    Accepts the key via `X-API-Key` or `Authorization: Bearer <key>`. No-op when
-    API_KEY is unset, so local/self-hosted use stays open.
-    """
-    if not settings.auth_enabled:
-        return
-    provided = x_api_key
-    if not provided and authorization and authorization.lower().startswith("bearer "):
-        provided = authorization[7:].strip()
-    if not provided or not secrets.compare_digest(provided, settings.api_key):
-        raise HTTPException(401, "Invalid or missing API key.")
 
 
 class ChatMessage(BaseModel):
@@ -56,9 +40,17 @@ class FollowupRequest(BaseModel):
 
 app = FastAPI(title="Student Tutor API", version="0.1.0")
 
-# Rate limiting is added first (innermost) so it runs after CORS; CORS is added
-# last (outermost) so its headers are attached even to 429 responses.
+# Middleware order: the last one added is the outermost. We want
+# CORS (outermost, so its headers reach even 429 responses) -> Session
+# (so the rate limiter can see who the user is) -> rate limiting -> routes.
 app.add_middleware(RateLimitMiddleware, limit_per_minute=settings.rate_limit_per_minute)
+
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=settings.session_secret,
+    same_site="lax",
+    https_only=settings.cookie_secure,
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -68,20 +60,24 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth_router)
+
 
 @app.get("/api/health")
 def health() -> dict:
     return {
         "status": "ok",
         "cloud_enabled": settings.cloud_enabled,
-        "auth_required": settings.auth_enabled,
+        "auth_required": settings.auth_enabled or settings.oauth_enabled,
+        "api_key_required": settings.auth_enabled,
+        "oauth_providers": settings.oauth_providers,
         "ollama_model": settings.ollama_model,
         "openrouter_model": settings.openrouter_model,
         "openrouter_vision_model": settings.openrouter_vision_model,
     }
 
 
-@app.post("/api/explain", dependencies=[Depends(require_api_key)])
+@app.post("/api/explain", dependencies=[Depends(require_access)])
 async def explain(
     text: str = Form(""),
     files: list[UploadFile] | None = File(None),
@@ -157,7 +153,7 @@ async def explain(
     }
 
 
-@app.post("/api/followup", dependencies=[Depends(require_api_key)])
+@app.post("/api/followup", dependencies=[Depends(require_access)])
 async def followup(payload: FollowupRequest) -> dict:
     if payload.level not in ALLOWED_LEVELS:
         raise HTTPException(400, f"level must be one of {sorted(ALLOWED_LEVELS)}")

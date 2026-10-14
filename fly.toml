@@ -1,0 +1,32 @@
+# Fly.io deployment config. Rename `app` to a globally-unique name
+# (or run `fly launch` and let it set the name), then:
+#   fly secrets set SESSION_SECRET=... OPENROUTER_API_KEY=... \
+#     GOOGLE_CLIENT_ID=... GOOGLE_CLIENT_SECRET=... \
+#     GITHUB_CLIENT_ID=... GITHUB_CLIENT_SECRET=... \
+#     PUBLIC_BASE_URL=https://<app>.fly.dev
+#   fly deploy
+app = "study-buddy"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  # Trust Fly's edge proxy for the client IP (rate limiting).
+  TRUST_PROXY = "true"
+  # There is no local Ollama inside the container, so use the cloud engine.
+  # Set OLLAMA_BASE_URL only if you point it at an external Ollama host.
+  OLLAMA_BASE_URL = ""
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ["app"]
+
+  [http_service.concurrency]
+    type = "requests"
+    hard_limit = 50
+    soft_limit = 25

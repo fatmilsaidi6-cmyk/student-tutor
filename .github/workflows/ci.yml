@@ -46,3 +46,23 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm run build
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build production image
+        run: docker build -t study-buddy:ci .
+
+      - name: Smoke-test the image
+        run: |
+          docker run -d --name sb -p 8000:8000 -e SESSION_SECRET=ci-secret study-buddy:ci
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:8000/api/health; then ok=1; break; fi
+            sleep 1
+          done
+          test "${ok:-0}" = "1"
+          curl -fsS http://localhost:8000/ | grep -qi "<!doctype html>"
+          docker logs sb
+          docker rm -f sb

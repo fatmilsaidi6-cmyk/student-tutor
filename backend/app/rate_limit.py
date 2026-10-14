@@ -1,8 +1,9 @@
-"""A tiny in-memory, per-client-IP sliding-window rate limiter.
+"""A tiny in-memory, per-client sliding-window rate limiter.
 
-Good enough to stop a single client from draining a cloud API key or
-saturating the CPU. It is intentionally dependency-free and process-local;
-for a multi-worker deployment put a real limiter (e.g. at the proxy) in front.
+The bucket key is the signed-in user's email when available, otherwise the
+client IP (taken from a proxy header when TRUST_PROXY is set). It is
+intentionally dependency-free and process-local; for a multi-worker deployment
+put a real limiter (e.g. at the proxy) in front.
 """
 
 from __future__ import annotations
@@ -14,10 +15,31 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
+from .config import settings
+
 # Only these (expensive) endpoints are limited; health checks and static
 # assets are always allowed through.
 LIMITED_PATHS = ("/api/explain", "/api/followup")
 WINDOW_SECONDS = 60.0
+
+
+def client_ip(request: Request) -> str:
+    if settings.trust_proxy:
+        forwarded = request.headers.get("x-forwarded-for")
+        if forwarded:
+            return forwarded.split(",")[0].strip()
+        fly = request.headers.get("fly-client-ip")
+        if fly:
+            return fly
+    return request.client.host if request.client else "unknown"
+
+
+def _bucket_key(request: Request) -> str:
+    session = request.scope.get("session") or {}
+    user = session.get("user")
+    if user and user.get("email"):
+        return f"user:{user['email']}"
+    return f"ip:{client_ip(request)}"
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
@@ -32,9 +54,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             and request.method == "POST"
             and request.url.path in LIMITED_PATHS
         ):
-            client = request.client.host if request.client else "unknown"
+            key = _bucket_key(request)
             now = time.monotonic()
-            hits = self._hits[client]
+            hits = self._hits[key]
             while hits and now - hits[0] > WINDOW_SECONDS:
                 hits.popleft()
             if len(hits) >= self.limit:

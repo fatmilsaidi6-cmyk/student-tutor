@@ -20,6 +20,7 @@ Study Buddy is an AI tutor. A student **types their problem or uploads a photo/P
 - [Project structure](#project-structure)
 - [Getting started](#getting-started)
 - [Configuration](#configuration)
+- [Authentication](#authentication)
 - [API reference](#api-reference)
 - [Running in VS Code](#running-in-vs-code)
 - [Testing](#testing)
@@ -38,6 +39,7 @@ Study Buddy is an AI tutor. A student **types their problem or uploads a photo/P
 - **Copy / download** — export the explanation and discussion as Markdown.
 - **Dark mode** — plus remembered level, engine, and theme preferences.
 - **Private-first** — runs fully offline with a local model, with an optional cloud fallback for harder/vision tasks.
+- **Optional sign-in** — for public deployments, gate the app behind Google/GitHub OAuth; history still stays in the browser.
 
 ## How it works
 
@@ -67,11 +69,13 @@ The prompts define the level-specific voice and a six-point tutoring method (res
 
 ## Tech stack
 
-**Backend** — FastAPI, Uvicorn, httpx, PyMuPDF, pytesseract, Pillow, python-dotenv.
+**Backend** — FastAPI, Uvicorn, httpx, PyMuPDF, pytesseract, Pillow, python-dotenv; OAuth via httpx with a signed session cookie (itsdangerous).
 
 **Frontend** — React 19 + Vite, react-markdown, remark-math + rehype-katex (KaTeX), oxlint.
 
 **Models** — any [Ollama](https://ollama.com) model locally, and/or [OpenRouter](https://openrouter.ai) in the cloud.
+
+**Auth** — optional Google / GitHub sign-in (no database; identity in a signed cookie).
 
 ## Project structure
 
@@ -83,21 +87,25 @@ student-tutor/
 │   │   ├── ai.py          # local (Ollama) + cloud (OpenRouter) backends and routing
 │   │   ├── config.py      # environment-based settings
 │   │   ├── extract.py     # PDF text layer -> cloud vision -> local OCR
-│   │   ├── rate_limit.py  # per-IP rate limiting middleware
+│   │   ├── auth.py        # Google/GitHub OAuth, session + access gate
+│   │   ├── rate_limit.py  # per-user/IP rate limiting middleware
 │   │   └── prompts.py     # level-adapted Socratic tutoring prompts
-│   ├── tests/             # pytest suite (API + extraction)
+│   ├── tests/             # pytest suite (API, auth, extraction, rate limit)
 │   ├── requirements.txt
 │   ├── requirements-dev.txt
 │   └── .env.example
 ├── frontend/
 │   ├── src/
 │   │   ├── App.jsx              # main UI
+│   │   ├── components/Login.jsx     # sign-in screen
 │   │   ├── components/Markdown.jsx  # markdown + KaTeX renderer
 │   │   └── lib/                 # api.js, storage.js
 │   └── package.json
 ├── Dockerfile                   # single-image production build
-├── .github/workflows/ci.yml     # tests + lint + build on push/PR
+├── fly.toml                     # Fly.io deployment config
+├── .github/workflows/ci.yml     # tests + lint + build + docker on push/PR
 ├── PRIVACY.md                   # data handling & child-safety notes
+├── LICENSE                      # MIT
 ├── .vscode/                     # launch + tasks for debugging/running
 └── student-tutor.code-workspace
 ```
@@ -171,20 +179,72 @@ Copy `backend/.env.example` to `backend/.env`:
 | `API_KEY` | *(empty)* | When set, the AI endpoints require this key (`X-API-Key` header or `Authorization: Bearer`). The web UI prompts for it and remembers it in the browser. |
 | `MAX_IMAGE_PIXELS` | `40000000` | Reject images above this pixel count (decompression-bomb guard). |
 | `MAX_PDF_PAGES` | `20` | Reject PDFs with more pages than this. |
+| `SESSION_SECRET` | `dev-insecure-change-me` | Signing key for the session cookie. **Set a long random value in production.** |
+| `PUBLIC_BASE_URL` | *(empty)* | Public URL of the deployment (e.g. `https://study-buddy.fly.dev`). Used to build OAuth redirect URIs and to mark the cookie `Secure`. |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | *(empty)* | Enable "Sign in with Google". |
+| `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | *(empty)* | Enable "Sign in with GitHub". |
+| `ALLOWED_EMAILS` | *(empty)* | Optional comma-separated allowlist of emails. Empty = any signed-in user. |
+| `TRUST_PROXY` | `false` | Trust `X-Forwarded-For` / `Fly-Client-IP` for the client IP (rate limiting). Set `true` behind a proxy. |
+
+## Authentication
+
+By default the app is open (ideal for local/self-hosted use). To publish it
+publicly, enable one or both OAuth providers — when any is configured, the AI
+endpoints require a signed-in user, and the UI shows a sign-in screen. No
+database is used: the provider profile (name, email, avatar) is stored in a
+signed, HTTP-only session cookie, and homework/history stays in the browser.
+
+**1. Create the OAuth apps**
+
+- **Google** — [Google Cloud Console](https://console.cloud.google.com/apis/credentials)
+  → *Create credentials* → *OAuth client ID* → *Web application*.
+  Authorized redirect URI: `https://<your-domain>/api/auth/callback/google`
+- **GitHub** — [GitHub Developer settings](https://github.com/settings/developers)
+  → *New OAuth App*. Authorization callback URL:
+  `https://<your-domain>/api/auth/callback/github`
+
+For local testing use `http://localhost:8000/api/auth/callback/<provider>`
+(the backend derives the redirect URI from the request, or from `PUBLIC_BASE_URL`).
+
+**2. Set the secrets**
+
+```bash
+export SESSION_SECRET="$(openssl rand -hex 32)"   # required
+export PUBLIC_BASE_URL="https://<your-domain>"
+export GOOGLE_CLIENT_ID=...  GOOGLE_CLIENT_SECRET=...
+export GITHUB_CLIENT_ID=...  GITHUB_CLIENT_SECRET=...
+# optional: restrict who may sign in
+export ALLOWED_EMAILS="me@example.com,co-teacher@example.com"
+```
+
+On Fly.io, set these with `fly secrets set ...` (see [Deployment](#deployment)).
+
+**3. Restrict access (recommended for children).** Set `ALLOWED_EMAILS` to an
+allowlist, or leave it empty to allow any signed-in account. Combine with the
+per-user rate limit to cap cost.
 
 ## API reference
 
 | Method | Path | Body | Returns |
 | ------ | ---- | ---- | ------- |
-| `GET`  | `/api/health` | — | status, active models, whether cloud is enabled |
+| `GET`  | `/api/health` | — | status, active models, `auth_required`, `oauth_providers` |
+| `GET`  | `/api/auth/me` | — | the signed-in `user` (or `null`) and configured providers |
+| `GET`  | `/api/auth/login/{provider}` | — | `302` redirect to the provider |
+| `GET`  | `/api/auth/callback/{provider}` | `code`, `state` | sets the session, redirects to `/` |
+| `POST` | `/api/auth/logout` | — | clears the session |
 | `POST` | `/api/explain` | multipart: `text`, `files[]`, `level`, `subject`, `question`, `engine` | `explanation`, `extracted_text`, `read_method`, `engine_used`, … |
 | `POST` | `/api/followup` | JSON: `context`, `messages[]`, `level`, `subject`, `engine` | `answer`, `engine_used` |
 
 `level` ∈ `primary · middle · high · university`; `engine` ∈ `auto · local · cloud`.
 
-The two AI endpoints are rate-limited per client IP (default 30 requests/minute, see `RATE_LIMIT_PER_MINUTE`). Exceeding it returns `429 Too Many Requests` with a `Retry-After` header.
+The two AI endpoints are rate-limited per signed-in user (or client IP when
+signed out) — default 30 requests/minute, see `RATE_LIMIT_PER_MINUTE`. Exceeding
+it returns `429 Too Many Requests` with a `Retry-After` header.
 
-When `API_KEY` is set, both AI endpoints require it; send `X-API-Key: <key>` or `Authorization: Bearer <key>`. Missing/invalid keys get `401`. `/api/health` reports whether auth is required via `auth_required`.
+**Access control.** When OAuth is configured, the AI endpoints require a
+signed-in session. When `API_KEY` is set, they instead (or additionally) accept
+that key via `X-API-Key: <key>` or `Authorization: Bearer <key>`. When neither
+is configured the app is open. Missing credentials return `401`.
 
 ```bash
 curl -X POST http://localhost:8000/api/explain \
@@ -243,22 +303,46 @@ docker run --rm -p 8000:8000 -e OPENROUTER_API_KEY=sk-or-... study-buddy
 
 Notes for hosting:
 
-- Set `PORT` to change the listen port (default `8000`); the image already binds
-  to `0.0.0.0` and exposes a `/api/health` health check.
-- Serve it behind HTTPS/a reverse proxy and set `CORS_ORIGINS` only if you host
-  the frontend on a different origin.
-- The built-in rate limiter is per-process; for multiple replicas add a limiter
-  at the proxy as well.
+- The container has **no local model** — on a host, set `OPENROUTER_API_KEY` to
+  use the cloud engine (the default `auto` engine will pick it up), or point
+  `OLLAMA_BASE_URL` at an external Ollama server.
+- Set `PORT` to change the listen port (default `8000`); the image binds to
+  `0.0.0.0` and exposes a `/api/health` health check.
+- Serve it behind HTTPS and set `TRUST_PROXY=true` so rate limiting sees the
+  real client IP. Set `PUBLIC_BASE_URL` so cookies are `Secure` and OAuth
+  redirect URIs are correct.
+- The built-in rate limiter is per-process and in-memory; for multiple replicas
+  add a limiter at the proxy as well.
+
+### Fly.io
+
+A `fly.toml` is included.
+
+```bash
+fly launch --no-deploy          # or edit `app` in fly.toml to a unique name
+fly secrets set \
+  SESSION_SECRET="$(openssl rand -hex 32)" \
+  OPENROUTER_API_KEY=sk-or-... \
+  PUBLIC_BASE_URL="https://<app>.fly.dev" \
+  GOOGLE_CLIENT_ID=... GOOGLE_CLIENT_SECRET=... \
+  GITHUB_CLIENT_ID=... GITHUB_CLIENT_SECRET=...
+fly deploy
+```
+
+Then add the callback URLs (`https://<app>.fly.dev/api/auth/callback/google`
+and `.../github`) to the provider apps you created in
+[Authentication](#authentication).
 
 ## Security & privacy
 
 Study Buddy runs **private by default**: with the local engine, homework never
-leaves the machine, and there is no server-side storage or accounts.
+leaves the machine, and there is no server-side storage of homework or history.
 
-- **Access control** — set `API_KEY` to require a shared code on the AI
-  endpoints (`X-API-Key` / `Authorization: Bearer`). The UI prompts for it and
-  remembers it locally.
-- **Abuse protection** — per-IP rate limiting on the AI endpoints.
+- **Access control** — enable Google/GitHub OAuth (recommended for public use)
+  and/or set `API_KEY`. Sessions are signed HTTP-only cookies; identity (name,
+  email, avatar) is the only thing stored, never homework.
+- **Abuse & cost protection** — rate limiting per user/IP, plus optional
+  `ALLOWED_EMAILS` allowlist.
 - **Untrusted uploads** — caps on file size/count, image pixels
   (decompression-bomb guard), and PDF pages; PDFs are read in memory only.
 - **Cloud mode** sends the homework text/image to OpenRouter and its model
@@ -269,4 +353,4 @@ for deploying to children (consent, COPPA/GDPR-K, avoiding identifiable uploads)
 
 ## License
 
-No license has been added yet. Until one is chosen, all rights are reserved by the author.
+Released under the [MIT License](LICENSE).

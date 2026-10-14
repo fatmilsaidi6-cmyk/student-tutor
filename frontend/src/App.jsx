@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import Login from './components/Login.jsx'
 import Markdown from './components/Markdown.jsx'
 import { askFollowup, explainHomework } from './lib/api.js'
 import {
@@ -92,7 +93,11 @@ function App() {
 
   const [toast, setToast] = useState('')
   const [serverDown, setServerDown] = useState(false)
-  const [authRequired, setAuthRequired] = useState(false)
+  const [authChecked, setAuthChecked] = useState(false)
+  const [apiKeyRequired, setApiKeyRequired] = useState(false)
+  const [oauthProviders, setOauthProviders] = useState([])
+  const [user, setUser] = useState(null)
+  const [authError, setAuthError] = useState('')
   const [accessCode, setAccessCode] = useState(() => getAccessCode())
   const [codeInput, setCodeInput] = useState(() => getAccessCode())
   const [showCode, setShowCode] = useState(false)
@@ -123,20 +128,34 @@ function App() {
 
   useEffect(() => {
     let cancelled = false
-    fetch('/api/health')
-      .then((r) => {
-        if (!r.ok) throw new Error('unhealthy')
-        return r.json()
-      })
-      .then((data) => {
+    const params = new URLSearchParams(window.location.search)
+    const err = params.get('auth_error')
+    if (err) {
+      setAuthError(`Sign-in failed (${err}). Please try again.`)
+      window.history.replaceState({}, '', window.location.pathname)
+    }
+
+    Promise.all([
+      fetch('/api/health').then((r) => (r.ok ? r.json() : Promise.reject(new Error('bad')))),
+      fetch('/api/auth/me').then((r) => (r.ok ? r.json() : {})),
+    ])
+      .then(([health, me]) => {
         if (cancelled) return
         setServerDown(false)
-        setAuthRequired(!!data.auth_required)
-        if (data.auth_required && !accessCode) setShowCode(true)
+        setApiKeyRequired(!!health.api_key_required)
+        setOauthProviders(health.oauth_providers || [])
+        setUser(me.user || null)
+        if (health.api_key_required && !me.user && !(health.oauth_providers || []).length) {
+          setShowCode(true)
+        }
       })
       .catch(() => {
         if (!cancelled) setServerDown(true)
       })
+      .finally(() => {
+        if (!cancelled) setAuthChecked(true)
+      })
+
     return () => {
       cancelled = true
     }
@@ -150,6 +169,16 @@ function App() {
     setAccessCode(code)
     setShowCode(false)
     setToast(code ? 'Access code saved' : 'Access code cleared')
+  }
+
+  async function logout() {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' })
+    } catch {
+      /* ignore */
+    }
+    setUser(null)
+    setActive(null)
   }
 
   function addFiles(list) {
@@ -313,6 +342,23 @@ function App() {
     URL.revokeObjectURL(url)
   }
 
+  if (!authChecked) {
+    return <div className="boot" aria-busy="true" />
+  }
+
+  if (oauthProviders.length > 0 && !user) {
+    return (
+      <div className="app">
+        {serverDown && (
+          <div className="banner">
+            ⚠️ Can’t reach the backend. Start the server and reload this page.
+          </div>
+        )}
+        <Login providers={oauthProviders} error={authError} />
+      </div>
+    )
+  }
+
   return (
     <div className="app">
       <header className="topbar">
@@ -324,7 +370,7 @@ function App() {
           </div>
         </div>
         <div className="topbar-actions">
-          {authRequired && (
+          {apiKeyRequired && oauthProviders.length === 0 && (
             <button
               type="button"
               className={`ghost-btn ${accessCode ? 'unlocked' : ''}`}
@@ -333,6 +379,21 @@ function App() {
             >
               {accessCode ? '🔓' : '🔑'}
             </button>
+          )}
+          {user && (
+            <div className="user-menu">
+              {user.picture ? (
+                <img className="avatar" src={user.picture} alt="" referrerPolicy="no-referrer" />
+              ) : (
+                <span className="avatar fallback">{(user.name || '?').charAt(0).toUpperCase()}</span>
+              )}
+              <span className="user-name" title={user.email}>
+                {user.name || user.email}
+              </span>
+              <button type="button" className="mini-btn" onClick={logout}>
+                Sign out
+              </button>
+            </div>
           )}
           <button
             type="button"
@@ -352,7 +413,7 @@ function App() {
         </div>
       )}
 
-      {authRequired && showCode && (
+      {apiKeyRequired && oauthProviders.length === 0 && showCode && (
         <div className="banner auth">
           <span>
             {accessCode

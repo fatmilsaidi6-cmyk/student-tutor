@@ -41,6 +41,27 @@ class Settings:
     max_image_pixels: int = int(os.getenv("MAX_IMAGE_PIXELS", "40000000"))
     max_pdf_pages: int = int(os.getenv("MAX_PDF_PAGES", "20"))
 
+    # --- OAuth sign-in (Google / GitHub) ---
+    # Signing key for the session cookie. Set a long random value in production.
+    session_secret: str = os.getenv("SESSION_SECRET", "dev-insecure-change-me")
+    # Public base URL of the deployment (used to build OAuth redirect URIs and
+    # to decide whether the session cookie is Secure). e.g. https://app.fly.dev
+    public_base_url: str = os.getenv("PUBLIC_BASE_URL", "")
+    google_client_id: str = os.getenv("GOOGLE_CLIENT_ID", "")
+    google_client_secret: str = os.getenv("GOOGLE_CLIENT_SECRET", "")
+    github_client_id: str = os.getenv("GITHUB_CLIENT_ID", "")
+    github_client_secret: str = os.getenv("GITHUB_CLIENT_SECRET", "")
+    # Optional comma-separated allowlist of emails. Empty = allow any signed-in user.
+    allowed_emails: str = os.getenv("ALLOWED_EMAILS", "")
+
+    # Trust the client IP from X-Forwarded-For / Fly-Client-IP (set behind a proxy).
+    trust_proxy: bool = os.getenv("TRUST_PROXY", "false").lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
     @property
     def cloud_enabled(self) -> bool:
         return bool(self.openrouter_api_key.strip())
@@ -52,6 +73,27 @@ class Settings:
     @property
     def cors_origins_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    @property
+    def oauth_providers(self) -> list[str]:
+        providers: list[str] = []
+        if self.google_client_id and self.google_client_secret:
+            providers.append("google")
+        if self.github_client_id and self.github_client_secret:
+            providers.append("github")
+        return providers
+
+    @property
+    def oauth_enabled(self) -> bool:
+        return bool(self.oauth_providers)
+
+    @property
+    def allowed_emails_list(self) -> list[str]:
+        return [e.strip().lower() for e in self.allowed_emails.split(",") if e.strip()]
+
+    @property
+    def cookie_secure(self) -> bool:
+        return self.public_base_url.startswith("https://")
 
 
 settings = Settings()
