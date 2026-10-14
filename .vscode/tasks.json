@@ -1,0 +1,58 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "backend: install deps",
+      "type": "shell",
+      "command": "${workspaceFolder:backend}/.venv/bin/pip install -r requirements.txt",
+      "options": { "cwd": "${workspaceFolder:backend}" },
+      "problemMatcher": []
+    },
+    {
+      "label": "backend: run",
+      "type": "shell",
+      "command": "${workspaceFolder:backend}/.venv/bin/uvicorn app.main:app --reload --host 127.0.0.1 --port 8000",
+      "options": { "cwd": "${workspaceFolder:backend}" },
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "frontend: install deps",
+      "type": "shell",
+      "command": "npm install",
+      "options": { "cwd": "${workspaceFolder:frontend}" },
+      "problemMatcher": []
+    },
+    {
+      "label": "frontend: dev",
+      "type": "shell",
+      "command": "npm run dev",
+      "options": { "cwd": "${workspaceFolder:frontend}" },
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "frontend: lint",
+      "type": "shell",
+      "command": "npm run lint",
+      "options": { "cwd": "${workspaceFolder:frontend}" },
+      "problemMatcher": []
+    },
+    {
+      "label": "frontend: build",
+      "type": "shell",
+      "command": "npm run build",
+      "options": { "cwd": "${workspaceFolder:frontend}" },
+      "problemMatcher": []
+    },
+    {
+      "label": "app: build + run (single server)",
+      "type": "shell",
+      "command": "${workspaceFolder:backend}/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000",
+      "options": { "cwd": "${workspaceFolder:backend}" },
+      "dependsOn": ["frontend: build"],
+      "isBackground": true,
+      "problemMatcher": []
+    }
+  ]
+}
