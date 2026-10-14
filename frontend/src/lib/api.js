@@ -21,6 +21,13 @@ async function readJson(res) {
   }
 }
 
+function quotaFrom(res) {
+  const limit = Number(res.headers.get('X-Quota-Limit'))
+  const remaining = Number(res.headers.get('X-Quota-Remaining'))
+  if (!Number.isFinite(limit) || !Number.isFinite(remaining) || limit <= 0) return null
+  return { limit, remaining }
+}
+
 // Wrap fetch so a network-level failure (server down, wrong origin) gives a
 // clear message instead of the browser's bare "Failed to fetch".
 async function safeFetch(url, options) {
@@ -50,6 +57,7 @@ export async function explainHomework({ text, files, level, subject, question, e
   })
   const data = await readJson(res)
   if (!res.ok) throw new Error(detailMessage(data))
+  data.quota = quotaFrom(res)
   return data
 }
 
@@ -61,5 +69,6 @@ export async function askFollowup({ context, messages, level, subject, engine })
   })
   const data = await readJson(res)
   if (!res.ok) throw new Error(detailMessage(data))
+  data.quota = quotaFrom(res)
   return data
 }

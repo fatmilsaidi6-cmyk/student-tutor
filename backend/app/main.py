@@ -43,7 +43,11 @@ app = FastAPI(title="Student Tutor API", version="0.1.0")
 # Middleware order: the last one added is the outermost. We want
 # CORS (outermost, so its headers reach even 429 responses) -> Session
 # (so the rate limiter can see who the user is) -> rate limiting -> routes.
-app.add_middleware(RateLimitMiddleware, limit_per_minute=settings.rate_limit_per_minute)
+app.add_middleware(
+    RateLimitMiddleware,
+    limit_per_minute=settings.rate_limit_per_minute,
+    daily_quota=settings.daily_quota,
+)
 
 app.add_middleware(
     SessionMiddleware,
@@ -58,6 +62,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Quota-Limit", "X-Quota-Remaining"],
 )
 
 app.include_router(auth_router)

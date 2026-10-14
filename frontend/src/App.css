@@ -711,10 +711,21 @@ textarea:focus {
 }
 
 .foot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
   text-align: center;
   color: var(--muted);
   font-size: 0.78rem;
   margin-top: 26px;
+}
+.quota {
+  font-weight: 600;
+  color: var(--badge-text);
+}
+.quota.empty {
+  color: var(--error-text);
 }
 
 .toast {

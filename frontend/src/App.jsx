@@ -92,6 +92,7 @@ function App() {
   const [followupError, setFollowupError] = useState('')
 
   const [toast, setToast] = useState('')
+  const [quota, setQuota] = useState(null)
   const [serverDown, setServerDown] = useState(false)
   const [authChecked, setAuthChecked] = useState(false)
   const [apiKeyRequired, setApiKeyRequired] = useState(false)
@@ -217,6 +218,7 @@ function App() {
         question,
         engine,
       })
+      if (data.quota) setQuota(data.quota)
       const item = {
         id: newId(),
         createdAt: Date.now(),
@@ -279,6 +281,7 @@ function App() {
         subject: active.subject,
         engine,
       })
+      if (data.quota) setQuota(data.quota)
       patchActive({ messages: [...withUser, { role: 'assistant', content: data.answer }] })
     } catch (err) {
       setFollowupError(err.message || String(err))
@@ -675,6 +678,11 @@ function App() {
           Study Buddy · private local model + optional cloud fallback · your history stays in this
           browser
         </span>
+        {quota && (
+          <span className={`quota ${quota.remaining <= 0 ? 'empty' : ''}`}>
+            {quota.remaining} of {quota.limit} requests left today
+          </span>
+        )}
       </footer>
 
       {toast && <div className="toast">{toast}</div>}

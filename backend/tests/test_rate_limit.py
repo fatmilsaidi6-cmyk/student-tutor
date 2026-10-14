@@ -38,9 +38,11 @@ def test_bucket_key_prefers_signed_in_user():
     assert rate_limit._bucket_key(_request()) == "ip:1.2.3.4"
 
 
-def _app(limit: int) -> FastAPI:
+def _app(limit: int, daily_quota: int = 0) -> FastAPI:
     app = FastAPI()
-    app.add_middleware(RateLimitMiddleware, limit_per_minute=limit)
+    app.add_middleware(
+        RateLimitMiddleware, limit_per_minute=limit, daily_quota=daily_quota
+    )
 
     @app.get("/api/health")
     def health():
@@ -74,3 +76,33 @@ def test_limit_zero_disables_limiting():
     client = TestClient(_app(limit=0))
     for _ in range(10):
         assert client.post("/api/explain").status_code == 200
+
+
+def test_daily_quota_blocks_after_limit():
+    client = TestClient(_app(limit=0, daily_quota=2))
+    assert client.post("/api/explain").status_code == 200
+    assert client.post("/api/explain").status_code == 200
+    r = client.post("/api/explain")
+    assert r.status_code == 429
+    assert "Daily limit" in r.json()["detail"]
+    assert r.headers["X-Quota-Remaining"] == "0"
+
+
+def test_quota_remaining_header_counts_down():
+    client = TestClient(_app(limit=0, daily_quota=5))
+    r1 = client.post("/api/explain")
+    assert r1.headers["X-Quota-Limit"] == "5"
+    assert r1.headers["X-Quota-Remaining"] == "4"
+    r2 = client.post("/api/explain")
+    assert r2.headers["X-Quota-Remaining"] == "3"
+
+
+def test_quota_zero_disables_quota():
+    client = TestClient(_app(limit=0, daily_quota=0))
+    for _ in range(12):
+        assert client.post("/api/explain").status_code == 200
+
+
+def test_disabled_quota_sends_no_header():
+    client = TestClient(_app(limit=0, daily_quota=0))
+    assert "X-Quota-Remaining" not in client.post("/api/explain").headers

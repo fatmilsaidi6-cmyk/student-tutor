@@ -175,7 +175,8 @@ Copy `backend/.env.example` to `backend/.env`:
 | `OLLAMA_MODEL` | `Qwen-Hermes:latest` | Local model (set this to whatever you pulled). |
 | `OLLAMA_TIMEOUT` | `600` | Seconds to wait for a local answer. |
 | `CORS_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` | Comma-separated browser origins allowed to call the API. Only needed for the separate dev frontend; the single-server build is same-origin. |
-| `RATE_LIMIT_PER_MINUTE` | `30` | Max AI requests per client IP per minute (`0` disables). |
+| `RATE_LIMIT_PER_MINUTE` | `30` | Max AI requests per user/IP per minute (`0` disables). |
+| `DAILY_QUOTA` | `100` | Max AI requests per user/IP per UTC day (`0` disables). Caps cloud cost. |
 | `API_KEY` | *(empty)* | When set, the AI endpoints require this key (`X-API-Key` header or `Authorization: Bearer`). The web UI prompts for it and remembers it in the browser. |
 | `MAX_IMAGE_PIXELS` | `40000000` | Reject images above this pixel count (decompression-bomb guard). |
 | `MAX_PDF_PAGES` | `20` | Reject PDFs with more pages than this. |
@@ -237,9 +238,12 @@ per-user rate limit to cap cost.
 
 `level` ∈ `primary · middle · high · university`; `engine` ∈ `auto · local · cloud`.
 
-The two AI endpoints are rate-limited per signed-in user (or client IP when
-signed out) — default 30 requests/minute, see `RATE_LIMIT_PER_MINUTE`. Exceeding
-it returns `429 Too Many Requests` with a `Retry-After` header.
+The two AI endpoints are limited per signed-in user (or client IP when signed
+out): a short-window rate limit (`RATE_LIMIT_PER_MINUTE`, default 30/min) and a
+daily quota (`DAILY_QUOTA`, default 100/day, resetting at UTC midnight).
+Exceeding either returns `429 Too Many Requests` with a `Retry-After` header.
+When the quota is enabled, responses also carry `X-Quota-Limit` and
+`X-Quota-Remaining` headers.
 
 **Access control.** When OAuth is configured, the AI endpoints require a
 signed-in session. When `API_KEY` is set, they instead (or additionally) accept
@@ -341,8 +345,9 @@ leaves the machine, and there is no server-side storage of homework or history.
 - **Access control** — enable Google/GitHub OAuth (recommended for public use)
   and/or set `API_KEY`. Sessions are signed HTTP-only cookies; identity (name,
   email, avatar) is the only thing stored, never homework.
-- **Abuse & cost protection** — rate limiting per user/IP, plus optional
-  `ALLOWED_EMAILS` allowlist.
+- **Abuse & cost protection** — per-user/IP rate limiting **and a daily quota**
+  (`DAILY_QUOTA`), plus an optional `ALLOWED_EMAILS` allowlist. The UI shows the
+  remaining daily requests.
 - **Untrusted uploads** — caps on file size/count, image pixels
   (decompression-bomb guard), and PDF pages; PDFs are read in memory only.
 - **Cloud mode** sends the homework text/image to OpenRouter and its model

@@ -33,6 +33,9 @@ class Settings:
     # Max requests per client IP per minute to the AI endpoints (0 disables).
     rate_limit_per_minute: int = int(os.getenv("RATE_LIMIT_PER_MINUTE", "30"))
 
+    # Max AI requests per user (or IP when signed out) per UTC day (0 disables).
+    daily_quota: int = int(os.getenv("DAILY_QUOTA", "100"))
+
     # When set, the AI endpoints require this key (X-API-Key header or
     # Authorization: Bearer <key>). Leave empty to run open (local/self-hosted).
     api_key: str = os.getenv("API_KEY", "")
