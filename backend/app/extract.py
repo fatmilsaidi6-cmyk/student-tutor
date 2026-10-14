@@ -15,12 +15,24 @@ import pymupdf as fitz  # PyMuPDF
 from PIL import Image
 import pytesseract
 
+from .config import settings
 
 MIN_CHARS = 40
 
+# Guard against decompression-bomb images; Pillow raises above 2x this limit.
+Image.MAX_IMAGE_PIXELS = settings.max_image_pixels
+
 
 def _ocr_image_bytes(data: bytes) -> str:
-    img = Image.open(io.BytesIO(data))
+    try:
+        img = Image.open(io.BytesIO(data))
+        img.load()
+    except Image.DecompressionBombError as exc:
+        raise ValueError(
+            "That image is too large to process safely."
+        ) from exc
+    except Image.UnidentifiedImageError as exc:
+        raise ValueError("That file isn't a readable image.") from exc
     if img.mode not in ("RGB", "L"):
         img = img.convert("RGB")
     return pytesseract.image_to_string(img)
@@ -28,16 +40,24 @@ def _ocr_image_bytes(data: bytes) -> str:
 
 def _pdf_text_and_images(data: bytes) -> tuple[str, list[bytes]]:
     doc = fitz.open(stream=data, filetype="pdf")
-    texts: list[str] = []
-    images: list[bytes] = []
-    for page in doc:
-        page_text = page.get_text().strip()
-        if len(page_text) >= MIN_CHARS:
-            texts.append(page_text)
-        else:
-            pix = page.get_pixmap(dpi=200)
-            images.append(pix.tobytes("png"))
-    doc.close()
+    try:
+        if doc.needs_pass:
+            raise ValueError("That PDF is password-protected.")
+        if doc.page_count > settings.max_pdf_pages:
+            raise ValueError(
+                f"That PDF has too many pages (max {settings.max_pdf_pages})."
+            )
+        texts: list[str] = []
+        images: list[bytes] = []
+        for page in doc:
+            page_text = page.get_text().strip()
+            if len(page_text) >= MIN_CHARS:
+                texts.append(page_text)
+            else:
+                pix = page.get_pixmap(dpi=200)
+                images.append(pix.tobytes("png"))
+    finally:
+        doc.close()
     return "\n\n".join(texts).strip(), images
 
 
@@ -56,6 +76,9 @@ def _read_images(
     for b in images:
         try:
             chunks.append(_ocr_image_bytes(b))
+        except ValueError:
+            # A deliberate guardrail (too large / not an image) - surface it.
+            raise
         except Exception:
             chunks.append("")
     text = "\n\n".join(c.strip() for c in chunks if c.strip()).strip()

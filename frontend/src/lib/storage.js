@@ -1,5 +1,6 @@
 const HISTORY_KEY = 'studybuddy.history.v1'
 const PREFS_KEY = 'studybuddy.prefs.v1'
+const CODE_KEY = 'studybuddy.accesscode.v1'
 const MAX_HISTORY = 50
 
 export function newId() {
@@ -36,6 +37,23 @@ export function loadPrefs() {
 export function savePrefs(prefs) {
   try {
     localStorage.setItem(PREFS_KEY, JSON.stringify(prefs))
+  } catch {
+    /* ignore */
+  }
+}
+
+export function getAccessCode() {
+  try {
+    return localStorage.getItem(CODE_KEY) || ''
+  } catch {
+    return ''
+  }
+}
+
+export function saveAccessCode(code) {
+  try {
+    if (code) localStorage.setItem(CODE_KEY, code)
+    else localStorage.removeItem(CODE_KEY)
   } catch {
     /* ignore */
   }

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import secrets
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -21,6 +22,24 @@ MAX_FILES = 10
 
 # Built React app (frontend/dist), served by this same server in production.
 FRONTEND_DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
+
+
+def require_api_key(
+    x_api_key: str | None = Header(default=None),
+    authorization: str | None = Header(default=None),
+) -> None:
+    """Gate the AI endpoints when API_KEY is configured.
+
+    Accepts the key via `X-API-Key` or `Authorization: Bearer <key>`. No-op when
+    API_KEY is unset, so local/self-hosted use stays open.
+    """
+    if not settings.auth_enabled:
+        return
+    provided = x_api_key
+    if not provided and authorization and authorization.lower().startswith("bearer "):
+        provided = authorization[7:].strip()
+    if not provided or not secrets.compare_digest(provided, settings.api_key):
+        raise HTTPException(401, "Invalid or missing API key.")
 
 
 class ChatMessage(BaseModel):
@@ -55,13 +74,14 @@ def health() -> dict:
     return {
         "status": "ok",
         "cloud_enabled": settings.cloud_enabled,
+        "auth_required": settings.auth_enabled,
         "ollama_model": settings.ollama_model,
         "openrouter_model": settings.openrouter_model,
         "openrouter_vision_model": settings.openrouter_vision_model,
     }
 
 
-@app.post("/api/explain")
+@app.post("/api/explain", dependencies=[Depends(require_api_key)])
 async def explain(
     text: str = Form(""),
     files: list[UploadFile] | None = File(None),
@@ -137,7 +157,7 @@ async def explain(
     }
 
 
-@app.post("/api/followup")
+@app.post("/api/followup", dependencies=[Depends(require_api_key)])
 async def followup(payload: FollowupRequest) -> dict:
     if payload.level not in ALLOWED_LEVELS:
         raise HTTPException(400, f"level must be one of {sorted(ALLOWED_LEVELS)}")

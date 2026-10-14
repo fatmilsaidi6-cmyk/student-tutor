@@ -2,9 +2,11 @@ import { useEffect, useRef, useState } from 'react'
 import Markdown from './components/Markdown.jsx'
 import { askFollowup, explainHomework } from './lib/api.js'
 import {
+  getAccessCode,
   loadHistory,
   loadPrefs,
   newId,
+  saveAccessCode,
   saveHistory,
   savePrefs,
 } from './lib/storage.js'
@@ -90,6 +92,10 @@ function App() {
 
   const [toast, setToast] = useState('')
   const [serverDown, setServerDown] = useState(false)
+  const [authRequired, setAuthRequired] = useState(false)
+  const [accessCode, setAccessCode] = useState(() => getAccessCode())
+  const [codeInput, setCodeInput] = useState(() => getAccessCode())
+  const [showCode, setShowCode] = useState(false)
   const inputRef = useRef(null)
 
   const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'image/bmp']
@@ -120,7 +126,13 @@ function App() {
     fetch('/api/health')
       .then((r) => {
         if (!r.ok) throw new Error('unhealthy')
-        if (!cancelled) setServerDown(false)
+        return r.json()
+      })
+      .then((data) => {
+        if (cancelled) return
+        setServerDown(false)
+        setAuthRequired(!!data.auth_required)
+        if (data.auth_required && !accessCode) setShowCode(true)
       })
       .catch(() => {
         if (!cancelled) setServerDown(true)
@@ -128,7 +140,17 @@ function App() {
     return () => {
       cancelled = true
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  function saveCode(e) {
+    e.preventDefault()
+    const code = codeInput.trim()
+    saveAccessCode(code)
+    setAccessCode(code)
+    setShowCode(false)
+    setToast(code ? 'Access code saved' : 'Access code cleared')
+  }
 
   function addFiles(list) {
     const incoming = Array.from(list || []).filter(Boolean)
@@ -301,20 +323,54 @@ function App() {
             <p>Snap your homework, learn step by step.</p>
           </div>
         </div>
-        <button
-          type="button"
-          className="ghost-btn"
-          onClick={() => setTheme((t) => (t === 'light' ? 'dark' : 'light'))}
-          title="Toggle theme"
-        >
-          {theme === 'light' ? '🌙' : '☀️'}
-        </button>
+        <div className="topbar-actions">
+          {authRequired && (
+            <button
+              type="button"
+              className={`ghost-btn ${accessCode ? 'unlocked' : ''}`}
+              onClick={() => setShowCode((s) => !s)}
+              title={accessCode ? 'Access code set' : 'Access code required'}
+            >
+              {accessCode ? '🔓' : '🔑'}
+            </button>
+          )}
+          <button
+            type="button"
+            className="ghost-btn"
+            onClick={() => setTheme((t) => (t === 'light' ? 'dark' : 'light'))}
+            title="Toggle theme"
+          >
+            {theme === 'light' ? '🌙' : '☀️'}
+          </button>
+        </div>
       </header>
 
       {serverDown && (
         <div className="banner">
           ⚠️ Can’t reach the backend. Start the server, then open the app at{' '}
           <code>http://localhost:8000</code> — not by opening the HTML file directly.
+        </div>
+      )}
+
+      {authRequired && showCode && (
+        <div className="banner auth">
+          <span>
+            {accessCode
+              ? '🔒 Update the access code for this server:'
+              : '🔒 This server requires an access code to use the tutor.'}
+          </span>
+          <form className="auth-form" onSubmit={saveCode}>
+            <input
+              type="password"
+              value={codeInput}
+              onChange={(e) => setCodeInput(e.target.value)}
+              placeholder="Access code"
+              autoComplete="off"
+            />
+            <button type="submit" className="mini-btn">
+              Save
+            </button>
+          </form>
         </div>
       )}
 

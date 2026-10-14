@@ -1,9 +1,16 @@
+import { getAccessCode } from './storage.js'
+
 function detailMessage(data) {
   const detail = data?.detail
   if (Array.isArray(detail)) {
     return detail.map((d) => d.msg || JSON.stringify(d)).join('; ')
   }
   return detail || 'Something went wrong.'
+}
+
+function authHeaders() {
+  const code = getAccessCode()
+  return code ? { 'X-API-Key': code } : {}
 }
 
 async function readJson(res) {
@@ -36,7 +43,11 @@ export async function explainHomework({ text, files, level, subject, question, e
   fd.append('question', question)
   fd.append('engine', engine)
 
-  const res = await safeFetch('/api/explain', { method: 'POST', body: fd })
+  const res = await safeFetch('/api/explain', {
+    method: 'POST',
+    headers: authHeaders(),
+    body: fd,
+  })
   const data = await readJson(res)
   if (!res.ok) throw new Error(detailMessage(data))
   return data
@@ -45,7 +56,7 @@ export async function explainHomework({ text, files, level, subject, question, e
 export async function askFollowup({ context, messages, level, subject, engine }) {
   const res = await safeFetch('/api/followup', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify({ context, messages, level, subject, engine }),
   })
   const data = await readJson(res)

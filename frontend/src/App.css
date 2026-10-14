@@ -47,6 +47,41 @@
   border-radius: 5px;
 }
 
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ghost-btn.unlocked {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.banner.auth {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--text);
+}
+.banner.auth .auth-form {
+  display: flex;
+  gap: 6px;
+}
+.banner.auth input {
+  border: 1px solid var(--border-strong);
+  background: var(--field-soft);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 5px 10px;
+  font: inherit;
+  font-size: 0.85rem;
+  min-width: 160px;
+}
+
 /* ---------- layout ---------- */
 .layout {
   display: grid;

@@ -33,9 +33,21 @@ class Settings:
     # Max requests per client IP per minute to the AI endpoints (0 disables).
     rate_limit_per_minute: int = int(os.getenv("RATE_LIMIT_PER_MINUTE", "30"))
 
+    # When set, the AI endpoints require this key (X-API-Key header or
+    # Authorization: Bearer <key>). Leave empty to run open (local/self-hosted).
+    api_key: str = os.getenv("API_KEY", "")
+
+    # Upload guardrails for untrusted files.
+    max_image_pixels: int = int(os.getenv("MAX_IMAGE_PIXELS", "40000000"))
+    max_pdf_pages: int = int(os.getenv("MAX_PDF_PAGES", "20"))
+
     @property
     def cloud_enabled(self) -> bool:
         return bool(self.openrouter_api_key.strip())
+
+    @property
+    def auth_enabled(self) -> bool:
+        return bool(self.api_key.strip())
 
     @property
     def cors_origins_list(self) -> list[str]:

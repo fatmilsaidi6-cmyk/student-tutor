@@ -24,6 +24,7 @@ Study Buddy is an AI tutor. A student **types their problem or uploads a photo/P
 - [Running in VS Code](#running-in-vs-code)
 - [Testing](#testing)
 - [Deployment](#deployment)
+- [Security & privacy](#security--privacy)
 - [License](#license)
 
 ## Features
@@ -96,6 +97,7 @@ student-tutor/
 │   └── package.json
 ├── Dockerfile                   # single-image production build
 ├── .github/workflows/ci.yml     # tests + lint + build on push/PR
+├── PRIVACY.md                   # data handling & child-safety notes
 ├── .vscode/                     # launch + tasks for debugging/running
 └── student-tutor.code-workspace
 ```
@@ -166,6 +168,9 @@ Copy `backend/.env.example` to `backend/.env`:
 | `OLLAMA_TIMEOUT` | `600` | Seconds to wait for a local answer. |
 | `CORS_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` | Comma-separated browser origins allowed to call the API. Only needed for the separate dev frontend; the single-server build is same-origin. |
 | `RATE_LIMIT_PER_MINUTE` | `30` | Max AI requests per client IP per minute (`0` disables). |
+| `API_KEY` | *(empty)* | When set, the AI endpoints require this key (`X-API-Key` header or `Authorization: Bearer`). The web UI prompts for it and remembers it in the browser. |
+| `MAX_IMAGE_PIXELS` | `40000000` | Reject images above this pixel count (decompression-bomb guard). |
+| `MAX_PDF_PAGES` | `20` | Reject PDFs with more pages than this. |
 
 ## API reference
 
@@ -179,11 +184,16 @@ Copy `backend/.env.example` to `backend/.env`:
 
 The two AI endpoints are rate-limited per client IP (default 30 requests/minute, see `RATE_LIMIT_PER_MINUTE`). Exceeding it returns `429 Too Many Requests` with a `Retry-After` header.
 
+When `API_KEY` is set, both AI endpoints require it; send `X-API-Key: <key>` or `Authorization: Bearer <key>`. Missing/invalid keys get `401`. `/api/health` reports whether auth is required via `auth_required`.
+
 ```bash
 curl -X POST http://localhost:8000/api/explain \
+  -H "X-API-Key: $API_KEY" \
   -F "text=Solve 2x + 3 = 11 and explain each step." \
   -F "level=middle" -F "subject=Maths" -F "engine=local"
 ```
+
+Omit the `-H` line when `API_KEY` is unset.
 
 ## Running in VS Code
 
@@ -239,6 +249,23 @@ Notes for hosting:
   the frontend on a different origin.
 - The built-in rate limiter is per-process; for multiple replicas add a limiter
   at the proxy as well.
+
+## Security & privacy
+
+Study Buddy runs **private by default**: with the local engine, homework never
+leaves the machine, and there is no server-side storage or accounts.
+
+- **Access control** — set `API_KEY` to require a shared code on the AI
+  endpoints (`X-API-Key` / `Authorization: Bearer`). The UI prompts for it and
+  remembers it locally.
+- **Abuse protection** — per-IP rate limiting on the AI endpoints.
+- **Untrusted uploads** — caps on file size/count, image pixels
+  (decompression-bomb guard), and PDF pages; PDFs are read in memory only.
+- **Cloud mode** sends the homework text/image to OpenRouter and its model
+  provider. Use local mode if content must not leave your infrastructure.
+
+See **[PRIVACY.md](PRIVACY.md)** for the full data-handling notes and guidance
+for deploying to children (consent, COPPA/GDPR-K, avoiding identifiable uploads).
 
 ## License
 

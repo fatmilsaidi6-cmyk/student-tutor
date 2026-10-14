@@ -37,6 +37,27 @@ def test_image_falls_back_to_local_ocr():
     assert isinstance(text, str)
 
 
+def test_pdf_page_limit_is_enforced():
+    doc = pymupdf.open()
+    for _ in range(21):
+        doc.new_page()
+    data = doc.tobytes()
+    doc.close()
+    with pytest.raises(ValueError):
+        read_homework("too-many-pages.pdf", data)
+
+
+def test_image_pixel_guard(monkeypatch):
+    from PIL import Image as PILImage
+
+    monkeypatch.setattr(PILImage, "MAX_IMAGE_PIXELS", 10)
+    img = Image.new("RGB", (100, 100), "white")
+    buf = io.BytesIO()
+    img.save(buf, "PNG")
+    with pytest.raises(ValueError):
+        read_homework("bomb.png", buf.getvalue())
+
+
 def test_unknown_extension_is_attempted_as_image():
     # Unless tesseract is present this returns empty text, but it must not raise.
     img = Image.new("RGB", (10, 10), "white")
